@@ -19,34 +19,49 @@ st.set_page_config(page_title="TripPilot · AI Travel Planner", page_icon="✈�
 REQUIRED_KEYS = ["GROQ_API_KEY", "AVIATIONSTACK_API_KEY", "tavily_API_KEY", "DATABASE_URL"]
 
 
-def load_secrets_into_env():
+def load_secrets_into_env() -> str | None:
     """On Streamlit Cloud, keys live in st.secrets. main.py and the tools read
     os.environ, so copy them across (works for top-level keys or keys inside a
-    [section]). Locally, with no secrets.toml, .env is used instead."""
+    [section]). Locally, with no secrets.toml, .env is used instead.
+
+    Returns a description of why secrets couldn't be read, or None."""
     try:
         items = dict(st.secrets)
-    except Exception:  # no secrets file locally -> rely on .env
-        return
+    except FileNotFoundError:  # no secrets file (normal for local runs)
+        return "no secrets file was found"
+    except Exception as exc:  # usually invalid TOML in the Secrets box
+        return f"the Secrets box could not be read ({type(exc).__name__}: {exc})"
+    if not items:
+        return "the Secrets box is empty"
     for key, value in items.items():
         if isinstance(value, dict) or hasattr(value, "items"):
             for sub_key, sub_value in dict(value).items():
                 os.environ.setdefault(sub_key, str(sub_value))
         else:
             os.environ.setdefault(key, str(value))
+    return None
 
 
 # ---------- Load the compiled LangGraph app once (shared DB connection) ----------
 @st.cache_resource(show_spinner="Connecting to the travel agents…")
 def load_app():
-    load_secrets_into_env()
+    secrets_problem = load_secrets_into_env()
     from dotenv import load_dotenv
     load_dotenv()  # local runs: fill anything still missing from .env
 
     missing = [k for k in REQUIRED_KEYS if not os.getenv(k)]
     if missing:
+        found = []
+        try:
+            found = list(st.secrets.keys())
+        except Exception:
+            pass
         raise RuntimeError(
-            "Missing settings: " + ", ".join(missing) + ". On Streamlit Cloud add them under "
-            "Manage app → Settings → Secrets (e.g. GROQ_API_KEY = \"gsk_...\"), then reboot the app."
+            "Missing settings: " + ", ".join(missing) + ". "
+            + (f"Reason: {secrets_problem}. " if secrets_problem else "")
+            + (f"Secret names found: {', '.join(found)}. " if found else "")
+            + "On Streamlit Cloud open ⋮ → Settings → Secrets and use TOML format with quotes, "
+            'e.g.  GROQ_API_KEY = "gsk_..."  then Save and Reboot the app.'
         )
 
     from main import app  # importing main opens the Postgres connection once
