@@ -3,12 +3,11 @@ import json
 from typing import TypedDict, Annotated, Optional
 import operator
 
+import psycopg
 from psycopg.rows import dict_row
-from psycopg_pool import ConnectionPool
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 from langgraph.graph import StateGraph, START, END
-from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.postgres import PostgresSaver
 from langchain_core.messages import (
     AnyMessage,
@@ -157,46 +156,20 @@ def build_graph(checkpointer=None):
     return graph.compile(checkpointer=checkpointer)
 
 
-# ---------- Checkpointer shared by CLI and Streamlit ----------
-# Postgres when DATABASE_URL is set (pooled, reconnects after idle/serverless
-# pauses such as Neon's); otherwise in-memory history that is lost on restart.
-PLACEHOLDER_HOSTS = ("ep-xxx", "ep-your-real-host", "user:password@localhost")
+# ---------- Persistent connection so both CLI and Streamlit can share the compiled app ----------
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL is not set in .env")
 
+# PostgresSaver needs autocommit (for setup) and dict rows (to read checkpoints)
+_conn = psycopg.connect(
+    DATABASE_URL,
+    autocommit=True,
+    prepare_threshold=0,
+    row_factory=dict_row,
+)
+checkpointer = PostgresSaver(_conn)
+checkpointer.setup()  # creates checkpoint tables on first run
 
-def make_checkpointer():
-    """Returns (checkpointer, storage_description)."""
-    if not DATABASE_URL:
-        return InMemorySaver(), "memory (no DATABASE_URL set)"
-    if any(p in DATABASE_URL for p in PLACEHOLDER_HOSTS):
-        return InMemorySaver(), "memory (DATABASE_URL is still a placeholder)"
-
-    pool = None
-    try:
-        pool = ConnectionPool(
-            DATABASE_URL,
-            min_size=1,
-            max_size=5,
-            max_idle=240,          # drop idle connections before Neon suspends (5 min)
-            check=ConnectionPool.check_connection,  # test each connection before use
-            kwargs={               # PostgresSaver needs autocommit + dict rows
-                "autocommit": True,
-                "prepare_threshold": 0,
-                "row_factory": dict_row,
-            },
-            open=True,
-        )
-        pool.wait(timeout=15)
-        saver = PostgresSaver(pool)
-        saver.setup()  # creates checkpoint tables on first run
-        return saver, "postgres"
-    except Exception as exc:  # bad URL / DB unreachable -> keep the app usable
-        if pool is not None:
-            pool.close()  # stop background reconnect attempts
-        print(f"[warning] Postgres unavailable ({type(exc).__name__}: {exc}); using in-memory history.")
-        return InMemorySaver(), f"memory (Postgres unavailable: {type(exc).__name__})"
-
-
-checkpointer, STORAGE = make_checkpointer()
 app = build_graph(checkpointer)
 
 

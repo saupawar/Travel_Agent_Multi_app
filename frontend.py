@@ -16,7 +16,7 @@ st.set_page_config(page_title="TripPilot · AI Travel Planner", page_icon="✈�
 
 
 # ---------- Copy Streamlit Cloud secrets into environment variables ----------
-REQUIRED_KEYS = ["GROQ_API_KEY", "AVIATIONSTACK_API_KEY", "tavily_API_KEY"]  # DATABASE_URL is optional
+REQUIRED_KEYS = ["GROQ_API_KEY", "AVIATIONSTACK_API_KEY", "tavily_API_KEY", "DATABASE_URL"]
 
 
 def load_secrets_into_env() -> str | None:
