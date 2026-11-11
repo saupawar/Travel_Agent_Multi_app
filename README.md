@@ -33,7 +33,10 @@ All agents share a `TravelState` (see [`main.py`](main.py)). Each step is saved 
 - **Flight cards:** route, airport names, times, terminal/gate, delay, and a colour-coded status badge, with a status filter.
 - **Hotel cards:** short description, relevance score and a link to each result.
 - **Itinerary and summary tabs**, with the plan downloadable as Markdown.
-- **Per-traveller history:** conversations are saved to Postgres by traveller name.
+- **Per-traveller history:**
+  - **Enter a name** and your trips are saved under it (`user_<name>`). Enter the same name later to get them back.
+  - **Leave the name empty** and a guest session (`guest_<random id>`) is created for you. It's kept in the page URL, so refreshing or bookmarking the page keeps your trips. **Start a new session** begins a fresh one.
+  - On the command line (`python main.py`), the guest ID is remembered in a local, git-ignored `.trippilot_session` file.
 - **Clear error handling:** missing airports or API errors show as plain-language tips, not stack traces.
 
 ## Project structure
@@ -42,6 +45,7 @@ All agents share a `TravelState` (see [`main.py`](main.py)). Each step is saved 
 .
 ├── main.py              # TravelState, agents (nodes), LangGraph graph, Postgres checkpointer
 ├── frontend.py          # Streamlit UI
+├── user_session.py      # Traveller session IDs (named or automatic guest)
 ├── tools/
 │   ├── flight_tool.py   # Aviationstack: get_flights(dep_iata, arr_iata, limit=5)
 │   └── tavily_tool.py   # Tavily: tavily_search(query, max_results=5)

@@ -19,3 +19,6 @@ __pycache__/
 # OS / editor
 .DS_Store
 Thumbs.db
+
+# CLI guest session ID
+.trippilot_session

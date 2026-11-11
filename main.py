@@ -20,6 +20,7 @@ from langchain_groq import ChatGroq
 
 from tools.tavily_tool import tavily_search
 from tools.flight_tool import get_flights
+from user_session import thread_id_from_name, new_guest_id, cli_guest_id
 
 
 load_dotenv()  # reads GROQ_API_KEY from .env
@@ -177,9 +178,10 @@ checkpointer.setup()  # creates checkpoint tables on first run
 app = build_graph(checkpointer)
 
 
-def run(user_query: str, thread_id: str = "user_aarohi") -> dict:
-    """Run one travel request. Same thread_id = same saved conversation."""
-    config = {"configurable": {"thread_id": thread_id}}
+def run(user_query: str, thread_id: str | None = None) -> dict:
+    """Run one travel request. Same thread_id = same saved conversation.
+    With no thread_id, a new guest session is created."""
+    config = {"configurable": {"thread_id": thread_id or new_guest_id()}}
     return app.invoke(
         {
             "messages": [HumanMessage(content=user_query)],
@@ -195,9 +197,13 @@ def run(user_query: str, thread_id: str = "user_aarohi") -> dict:
 
 
 if __name__ == "__main__":
+    name = input("Your name (press Enter to continue as a guest): ")
+    thread_id = thread_id_from_name(name) or cli_guest_id()
+    print(f"Session: {thread_id}  (your trips are saved under this ID)\n")
+
     user_input = input("Enter travel request: ")
 
-    result = run(user_input, thread_id="user_aarohi")
+    result = run(user_input, thread_id=thread_id)
 
     print("\nFINAL RESPONSE:\n")
     print(result["final_response"])

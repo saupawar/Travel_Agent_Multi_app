@@ -13,6 +13,8 @@ from urllib.parse import quote_plus, urlparse
 import streamlit as st
 from langchain_core.messages import HumanMessage
 
+from user_session import is_valid_thread_id, name_from_thread_id, new_guest_id, thread_id_from_name
+
 st.set_page_config(page_title="TripPilot · AI Travel Planner", page_icon="✈️", layout="wide")
 
 
@@ -393,18 +395,74 @@ def plan_trip(query: str, thread_id: str) -> dict:
     return result
 
 
+def restore_trips(thread_id: str, limit: int = 10) -> list[dict]:
+    """Rebuild this traveller's completed trips from the Postgres checkpoints,
+    so their context survives page reloads and new browser sessions."""
+    try:
+        app = load_app()
+        trips = []
+        for snap in app.get_state_history({"configurable": {"thread_id": thread_id}}):
+            values = snap.values or {}
+            if snap.next or not values.get("final_response"):
+                continue  # only the final checkpoint of each finished trip
+            try:
+                when = datetime.fromisoformat(snap.created_at).astimezone().strftime("%d %b %H:%M")
+            except (TypeError, ValueError):
+                when = "saved"
+            trips.append({"query": values.get("user_query", ""), "result": dict(values), "time": when})
+            if len(trips) >= limit:
+                break
+        return list(reversed(trips))  # oldest first, like new trips are appended
+    except Exception:
+        return []  # no database / not configured yet: start with an empty history
+
+
 # ---------- Session state ----------
 st.session_state.setdefault("history", [])   # list of {"query", "result", "time"}
 st.session_state.setdefault("selected", None)
 st.session_state.setdefault("prefill", "")
 
+# Traveller identity: ?tid=... in the URL keeps the same session across reloads
+_url_tid = st.query_params.get("tid")
+_url_tid = _url_tid if is_valid_thread_id(_url_tid) else None
+if "guest_id" not in st.session_state:
+    st.session_state.guest_id = (
+        _url_tid if _url_tid and _url_tid.startswith("guest_") else new_guest_id()
+    )
+st.session_state.setdefault("traveller_name", name_from_thread_id(_url_tid))
+
+
+def start_new_session():
+    st.session_state.guest_id = new_guest_id()
+    st.session_state.traveller_name = ""
+
 
 # ---------- Sidebar ----------
 with st.sidebar:
     st.header("🧳 Traveller")
-    traveller = st.text_input("Your name", value="aarohi", help="Your trips are saved under this name.")
-    thread_id = f"user_{re.sub(r'[^a-z0-9_]', '', traveller.lower()) or 'guest'}"
+    traveller = st.text_input(
+        "Your name (optional)",
+        key="traveller_name",
+        placeholder="e.g. Priya",
+        help="Enter a name to save your trips under it. Leave empty to use an automatic guest session.",
+    )
+    thread_id = thread_id_from_name(traveller) or st.session_state.guest_id
+    if st.query_params.get("tid") != thread_id:
+        st.query_params["tid"] = thread_id
 
+    if traveller.strip():
+        st.caption(f"Trips are saved for **{traveller.strip()}** · session `{thread_id}`")
+    else:
+        st.caption(f"Guest session `{thread_id}`  \nBookmark this page to come back to your trips.")
+    st.button("🔄 Start a new session", on_click=start_new_session, use_container_width=True)
+
+# Switching traveller/session: load that traveller's saved trips
+if st.session_state.get("active_thread") != thread_id:
+    st.session_state.active_thread = thread_id
+    st.session_state.history = restore_trips(thread_id)
+    st.session_state.selected = len(st.session_state.history) - 1 if st.session_state.history else None
+
+with st.sidebar:
     st.divider()
     st.subheader("💡 Try an example")
     examples = [
