@@ -6,6 +6,7 @@ Reads AVIATIONSTACK_API_KEY from the environment (.env) and returns up to
 
 import os
 from datetime import datetime
+from zoneinfo import ZoneInfo  # needs the "tzdata" package on Windows
 
 import requests
 from dotenv import load_dotenv
@@ -30,6 +31,34 @@ def split_datetime(iso: str | None) -> tuple[str | None, str | None]:
     except ValueError:
         return iso, None
     return dt.strftime("%a, %d %b %Y"), dt.strftime("%H:%M")
+
+
+def local_to_aware(iso: str | None, tz: str | None) -> datetime | None:
+    """Treat Aviationstack's wall-clock time as local to the airport's time zone."""
+    if not iso or not tz:
+        return None
+    try:
+        return datetime.fromisoformat(iso).replace(tzinfo=ZoneInfo(tz))
+    except Exception:
+        return None
+
+
+def trip_timing(dep: dict, arr: dict) -> tuple[int | None, int]:
+    """(duration in minutes, days between departure and arrival dates)."""
+    start = local_to_aware(dep.get("scheduled"), dep.get("timezone"))
+    end = local_to_aware(arr.get("scheduled"), arr.get("timezone"))
+    duration = int((end - start).total_seconds() // 60) if start and end else None
+    if duration is not None and duration <= 0:
+        duration = None  # bad data; better to show nothing than a wrong number
+    day_offset = 0
+    try:
+        day_offset = (
+            datetime.fromisoformat(arr["scheduled"]).date()
+            - datetime.fromisoformat(dep["scheduled"]).date()
+        ).days
+    except Exception:
+        pass
+    return duration, day_offset
 
 
 def build_leg(leg: dict) -> dict:
@@ -97,6 +126,8 @@ def get_flights(dep_iata: str, arr_iata: str, limit: int = MAX_RESULTS) -> list[
         flight_info = flight.get("flight") or {}
         dep = flight.get("departure") or {}
         arr = flight.get("arrival") or {}
+        codeshared = flight_info.get("codeshared") or {}
+        duration_min, day_offset = trip_timing(dep, arr)
 
         results.append(
             {
@@ -104,10 +135,16 @@ def get_flights(dep_iata: str, arr_iata: str, limit: int = MAX_RESULTS) -> list[
                     "name": airline.get("name"),
                     "iata": airline.get("iata"),
                     "flight_number": flight_info.get("iata") or flight_info.get("number"),
+                    # Codeshare: this ticket is sold by `name` but flown by another airline
+                    "operated_by": codeshared.get("airline_name"),
+                    "operating_flight": (codeshared.get("flight_iata") or "").upper() or None,
                 },
                 "flight_date": flight.get("flight_date"),
                 "departure": build_leg(dep),
                 "arrival": build_leg(arr),
+                "duration_min": duration_min,   # e.g. 220 -> "3h 40m"
+                "day_offset": day_offset,       # 1 -> lands the next day ("+1")
+                "stops": 0,                     # each Aviationstack record is one direct flight
                 "status": flight.get("flight_status"),
             }
         )

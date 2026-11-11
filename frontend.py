@@ -8,6 +8,7 @@ import json
 import os
 import re
 from datetime import datetime
+from urllib.parse import quote_plus, urlparse
 
 import streamlit as st
 from langchain_core.messages import HumanMessage
@@ -79,22 +80,55 @@ st.markdown(
     }
     .hero h1 { margin: 0; font-size: 2.1rem; color: white; }
     .hero p  { margin: .35rem 0 0; opacity: .92; font-size: 1.05rem; }
-    .card {
-        border: 1px solid rgba(128,128,128,.25); border-radius: 14px;
-        padding: 1rem 1.2rem; margin-bottom: .9rem; background: rgba(128,128,128,.04);
+    .muted { opacity: .68; font-size: .86rem; }
+
+    /* Trip summary bar */
+    .tripbar {
+        display:flex; flex-wrap:wrap; align-items:center; gap:.5rem 1.4rem;
+        border:1px solid rgba(128,128,128,.25); border-radius:14px;
+        padding:.85rem 1.2rem; margin:.4rem 0 1rem; background:rgba(99,102,241,.06);
     }
-    .card h4 { margin: 0 0 .35rem; }
-    .muted { opacity: .7; font-size: .88rem; }
-    .route { display:flex; align-items:center; gap:1rem; justify-content:space-between; }
-    .route .end { flex:1; }
-    .route .end.right { text-align:right; }
-    .route .code { font-size:1.6rem; font-weight:700; line-height:1.1; }
-    .route .line { flex:1; text-align:center; opacity:.6; font-size:1.2rem; }
-    .route .when  { margin-top:.45rem; font-weight:600; }
-    .route .clock { font-size:1.35rem; font-weight:700; }
+    .tripbar .route { font-size:1.25rem; font-weight:700; }
+    .tripbar .chip  { font-size:.9rem; opacity:.85; }
+
+    /* Flight result row */
+    .fl-row {
+        display:grid; grid-template-columns: 1.4fr 2.2fr 1.2fr 1.2fr; gap:1rem; align-items:center;
+        border:1px solid rgba(128,128,128,.25); border-radius:14px;
+        padding:1rem 1.2rem; margin-bottom:.75rem; background:rgba(128,128,128,.03);
+        transition: box-shadow .15s, border-color .15s;
+    }
+    .fl-row:hover { border-color:#6366f1; box-shadow:0 2px 10px rgba(99,102,241,.15); }
+    .fl-airline { display:flex; align-items:center; gap:.7rem; }
+    .fl-logo {
+        width:42px; height:42px; border-radius:10px; flex:none;
+        display:flex; align-items:center; justify-content:center;
+        font-weight:800; font-size:.95rem; color:#fff;
+    }
+    .fl-name { font-weight:600; line-height:1.2; }
+    .fl-times { font-size:1.35rem; font-weight:700; letter-spacing:.2px; }
+    .fl-times sup { font-size:.7rem; color:#dc2626; font-weight:700; margin-left:2px; }
+    .fl-dur { font-weight:600; }
+    .fl-stops { font-size:.86rem; color:#16a34a; font-weight:600; }
+    .fl-act { text-align:right; }
+    .fl-act a {
+        display:inline-block; margin-top:.45rem; padding:.42rem .9rem; border-radius:999px;
+        background:#6366f1; color:#fff !important; text-decoration:none; font-weight:600; font-size:.86rem;
+    }
+    .fl-act a:hover { background:#4f46e5; }
+    .fl-tags { margin-bottom:.15rem; }
+    .tag { display:inline-block; font-size:.72rem; font-weight:700; padding:.12rem .5rem;
+           border-radius:6px; margin-right:.3rem; }
+    .tag-early { background:#e0f2fe; color:#075985; }
+    .tag-fast  { background:#dcfce7; color:#166534; }
+    @media (max-width: 760px) {
+        .fl-row { grid-template-columns: 1fr 1fr; }
+        .fl-act { text-align:left; }
+    }
+
     .badge {
         display:inline-block; padding:.15rem .6rem; border-radius:999px;
-        font-size:.78rem; font-weight:600; text-transform:capitalize;
+        font-size:.75rem; font-weight:600; text-transform:capitalize;
     }
     .s-scheduled { background:#dbeafe; color:#1e40af; }
     .s-active    { background:#dcfce7; color:#166534; }
@@ -102,6 +136,33 @@ st.markdown(
     .s-delayed, .s-incident, .s-diverted { background:#fef3c7; color:#92400e; }
     .s-cancelled { background:#fee2e2; color:#991b1b; }
     .s-unknown   { background:#e5e7eb; color:#374151; }
+
+    /* Stay (hotel) result row */
+    .st-row {
+        display:grid; grid-template-columns: 150px 1fr 150px; gap:1.1rem; align-items:stretch;
+        border:1px solid rgba(128,128,128,.25); border-radius:14px; overflow:hidden;
+        margin-bottom:.8rem; background:rgba(128,128,128,.03);
+    }
+    .st-row:hover { border-color:#6366f1; box-shadow:0 2px 10px rgba(99,102,241,.15); }
+    .st-thumb { display:flex; align-items:center; justify-content:center; font-size:2.6rem; min-height:130px; }
+    .st-body { padding:.9rem 0; }
+    .st-title { font-weight:700; font-size:1.05rem; margin-bottom:.2rem; }
+    .st-src { font-size:.82rem; opacity:.7; margin-bottom:.4rem; }
+    .st-snip { font-size:.9rem; opacity:.9; }
+    .st-side { padding:.9rem 1rem .9rem 0; display:flex; flex-direction:column;
+               justify-content:space-between; align-items:flex-end; text-align:right; }
+    .score { display:flex; align-items:center; gap:.45rem; }
+    .score b { background:#16a34a; color:#fff; border-radius:8px; padding:.2rem .45rem; font-size:.95rem; }
+    .score span { font-size:.82rem; font-weight:600; }
+    .st-side a {
+        padding:.42rem .9rem; border-radius:999px; background:#6366f1; color:#fff !important;
+        text-decoration:none; font-weight:600; font-size:.86rem;
+    }
+    @media (max-width: 760px) {
+        .st-row { grid-template-columns: 1fr; }
+        .st-thumb { min-height:80px; }
+        .st-body, .st-side { padding:0 1rem .9rem; align-items:flex-start; text-align:left; }
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -117,23 +178,8 @@ def parse_json_list(raw: str) -> list[dict]:
         return []
 
 
-def leg_date_time(leg: dict) -> tuple[str, str]:
-    """(date, time) for a departure/arrival leg, e.g. ('Wed, 11 Nov 2026', '16:25').
-    Uses the tool's pre-split fields, falling back to parsing 'scheduled'."""
-    if leg.get("date") or leg.get("time"):
-        return leg.get("date") or "—", leg.get("time") or "—"
-    iso = leg.get("scheduled")
-    if not iso:
-        return "—", "—"
-    try:
-        dt = datetime.fromisoformat(iso)  # Aviationstack: local time, no conversion
-        return dt.strftime("%a, %d %b %Y"), dt.strftime("%H:%M")
-    except ValueError:
-        return iso, "—"
-
-
 def esc(text) -> str:
-    """Minimal HTML escape for values placed inside our card markup."""
+    """Minimal HTML escape for values placed inside our markup."""
     return (str(text) if text is not None else "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
@@ -143,65 +189,174 @@ def first_error(items: list[dict]) -> str | None:
     return None
 
 
-def render_flight(f: dict):
+def leg_dt(leg: dict) -> datetime | None:
+    """Local wall-clock datetime of a leg (Aviationstack: local time, no conversion)."""
+    try:
+        return datetime.fromisoformat(leg.get("scheduled") or "").replace(tzinfo=None)
+    except ValueError:
+        return None
+
+
+def fmt_clock(dt: datetime | None) -> str:
+    return dt.strftime("%H:%M") if dt else "—"
+
+
+def fmt_day(dt: datetime | None) -> str:
+    return dt.strftime("%a, %d %b %Y") if dt else "—"
+
+
+def fmt_duration(minutes) -> str:
+    if not isinstance(minutes, (int, float)) or minutes <= 0:
+        return "—"
+    h, m = divmod(int(minutes), 60)
+    return f"{h}h {m:02d}m"
+
+
+def short_airport(name: str | None) -> str:
+    """'Chhatrapati Shivaji International (Sahar International)' -> 'Chhatrapati Shivaji International'."""
+    return re.sub(r"\s*\(.*?\)", "", name or "").strip()
+
+
+LOGO_COLOURS = ["#2563eb", "#7c3aed", "#db2777", "#ea580c", "#059669", "#0891b2", "#4f46e5", "#b45309"]
+
+
+def airline_logo(airline: dict) -> str:
+    code = (airline.get("iata") or (airline.get("name") or "?")[:2]).upper()[:3]
+    colour = LOGO_COLOURS[sum(map(ord, code)) % len(LOGO_COLOURS)]
+    return f'<div class="fl-logo" style="background:{colour}">{esc(code)}</div>'
+
+
+def fares_link(f: dict) -> str:
+    dep, arr = f.get("departure", {}), f.get("arrival", {})
+    q = f"Flights from {dep.get('iata', '')} to {arr.get('iata', '')} on {f.get('flight_date', '')}"
+    return "https://www.google.com/travel/flights?q=" + quote_plus(q)
+
+
+def time_bucket(dt: datetime | None) -> str:
+    if not dt:
+        return "Unknown"
+    h = dt.hour
+    if h < 6:
+        return "Early morning (00:00–05:59)"
+    if h < 12:
+        return "Morning (06:00–11:59)"
+    if h < 18:
+        return "Afternoon (12:00–17:59)"
+    return "Evening (18:00–23:59)"
+
+
+def render_flight(f: dict, tags: list[str]):
     airline, dep, arr = f.get("airline", {}), f.get("departure", {}), f.get("arrival", {})
     status = (f.get("status") or "unknown").lower()
+    d_dt, a_dt = leg_dt(dep), leg_dt(arr)
+    offset = f.get("day_offset") or 0
+    plus = f"<sup>+{offset}</sup>" if offset > 0 else ""
+    stops = f.get("stops", 0)
+    stops_txt = "Nonstop" if stops == 0 else f"{stops} stop{'s' if stops > 1 else ''}"
+    operated = airline.get("operated_by")
+    operated_txt = (
+        f'<div class="muted">Operated by {esc(operated)}'
+        f'{" (" + esc(airline.get("operating_flight")) + ")" if airline.get("operating_flight") else ""}</div>'
+        if operated else ""
+    )
     delay = dep.get("delay_min")
-    dep_extra = " · ".join(
-        x for x in [f"T{dep['terminal']}" if dep.get("terminal") else "", f"Gate {dep['gate']}" if dep.get("gate") else ""] if x
+    delay_txt = f'<div class="muted" style="color:#b45309">Delayed {esc(delay)} min</div>' if delay else ""
+    tag_html = "".join(
+        f'<span class="tag {"tag-early" if t == "Earliest" else "tag-fast"}">{esc(t)}</span>' for t in tags
     )
-    arr_extra = " · ".join(
-        x for x in [f"T{arr['terminal']}" if arr.get("terminal") else "", f"Gate {arr['gate']}" if arr.get("gate") else ""] if x
-    )
-    dep_date, dep_time = leg_date_time(dep)
-    arr_date, arr_time = leg_date_time(arr)
+
     st.markdown(
         f"""
-        <div class="card">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.6rem">
-            <h4>✈️ {esc(airline.get('name') or 'Unknown airline')}
-              <span class="muted">&nbsp;{esc(airline.get('flight_number') or '')}</span></h4>
+        <div class="fl-row">
+          <div class="fl-airline">
+            {airline_logo(airline)}
+            <div>
+              <div class="fl-name">{esc(airline.get('name') or 'Unknown airline')}</div>
+              <div class="muted">{esc(airline.get('flight_number') or '')}</div>
+              {operated_txt}
+            </div>
+          </div>
+          <div>
+            <div class="fl-tags">{tag_html}</div>
+            <div class="fl-times">{fmt_clock(d_dt)} – {fmt_clock(a_dt)}{plus}</div>
+            <div class="muted">{esc(short_airport(dep.get('airport')))} ({esc(dep.get('iata'))})
+              – {esc(short_airport(arr.get('airport')))} ({esc(arr.get('iata'))})</div>
+            <div class="muted">{fmt_day(d_dt)}{' → ' + fmt_day(a_dt) if offset else ''}</div>
+          </div>
+          <div>
+            <div class="fl-dur">{fmt_duration(f.get('duration_min'))}</div>
+            <div class="fl-stops">{stops_txt}</div>
+          </div>
+          <div class="fl-act">
             <span class="badge s-{esc(status)}">{esc(status)}</span>
+            {delay_txt}
+            <div><a href="{esc(fares_link(f))}" target="_blank" rel="noopener">Check fares ↗</a></div>
           </div>
-          <div class="route">
-            <div class="end">
-              <div class="code">{esc(dep.get('iata') or '—')}</div>
-              <div class="muted">{esc(dep.get('airport') or '')}</div>
-              <div class="when">🛫 {esc(dep_date)}</div>
-              <div class="clock">{esc(dep_time)}</div>
-              <div class="muted">{esc(dep_extra)}</div>
-            </div>
-            <div class="line">──────── ✈ ────────</div>
-            <div class="end right">
-              <div class="code">{esc(arr.get('iata') or '—')}</div>
-              <div class="muted">{esc(arr.get('airport') or '')}</div>
-              <div class="when">🛬 {esc(arr_date)}</div>
-              <div class="clock">{esc(arr_time)}</div>
-              <div class="muted">{esc(arr_extra)}</div>
-            </div>
-          </div>
-          <div class="muted" style="margin-top:.5rem">Times are local to each airport.</div>
-          {f'<div class="muted">⏱ Departure delayed by {esc(delay)} min</div>' if delay else ''}
         </div>
         """,
         unsafe_allow_html=True,
     )
+    with st.expander(f"Flight details · {airline.get('flight_number') or ''}"):
+        c1, c2 = st.columns(2)
+        for col, label, leg, dt in ((c1, "🛫 Departure", dep, d_dt), (c2, "🛬 Arrival", arr, a_dt)):
+            col.markdown(f"**{label}**")
+            col.markdown(
+                f"{leg.get('airport') or '—'} ({leg.get('iata') or '—'})  \n"
+                f"**{fmt_day(dt)} · {fmt_clock(dt)}** local time"
+                + (f" ({leg['timezone']})" if leg.get("timezone") else "") + "  \n"
+                f"Terminal {leg.get('terminal') or '—'} · Gate {leg.get('gate') or '—'}"
+                + (f"  \nEstimated: {leg['estimated_time']}" if leg.get("estimated_time") else "")
+                + (f"  \nActual: {leg['actual_time']}" if leg.get("actual_time") else "")
+            )
 
 
-def render_hotel(h: dict):
+def match_label(score: float) -> str:
+    if score >= 0.9:
+        return "Excellent match"
+    if score >= 0.75:
+        return "Great match"
+    if score >= 0.6:
+        return "Good match"
+    return "Related"
+
+
+THUMB_GRADIENTS = [
+    "linear-gradient(135deg,#0ea5e9,#6366f1)", "linear-gradient(135deg,#f59e0b,#ef4444)",
+    "linear-gradient(135deg,#10b981,#0ea5e9)", "linear-gradient(135deg,#8b5cf6,#ec4899)",
+    "linear-gradient(135deg,#14b8a6,#84cc16)",
+]
+
+
+def render_stay(h: dict, i: int):
     snippet = re.sub(r"\s+", " ", h.get("content") or "").strip()
-    if len(snippet) > 260:
-        snippet = snippet[:260].rsplit(" ", 1)[0] + "…"
+    snippet = re.sub(r"[|#*]+", " ", snippet)  # strip table/markdown noise from scraped text
+    if len(snippet) > 220:
+        snippet = snippet[:220].rsplit(" ", 1)[0] + "…"
+    url = h.get("url") or ""
+    source = urlparse(url).netloc.replace("www.", "") if url else ""
     score = h.get("score")
-    with st.container(border=True):
-        st.markdown(f"#### 🏨 {h.get('title') or 'Untitled result'}")
-        if snippet:
-            st.write(snippet)
-        c1, c2 = st.columns([3, 1])
-        if h.get("url"):
-            c1.link_button("View details ↗", h["url"])
-        if isinstance(score, (int, float)):
-            c2.caption(f"Relevance {score:.0%}")
+    score_html = (
+        f'<div class="score"><span>{match_label(score)}</span><b>{score * 10:.1f}</b></div>'
+        if isinstance(score, (int, float)) else "<div></div>"
+    )
+    link_html = f'<a href="{esc(url)}" target="_blank" rel="noopener">View ↗</a>' if url else ""
+    st.markdown(
+        f"""
+        <div class="st-row">
+          <div class="st-thumb" style="background:{THUMB_GRADIENTS[i % len(THUMB_GRADIENTS)]}">🏨</div>
+          <div class="st-body">
+            <div class="st-title">{esc(h.get('title') or 'Untitled result')}</div>
+            <div class="st-src">🌐 {esc(source)}</div>
+            <div class="st-snip">{esc(snippet)}</div>
+          </div>
+          <div class="st-side">
+            {score_html}
+            {link_html}
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 AGENT_STEPS = {
@@ -321,26 +476,33 @@ result = trip["result"]
 flights = parse_json_list(result.get("flight_results", ""))
 hotels = parse_json_list(result.get("hotel_results", ""))
 flight_err, hotel_err = first_error(flights), first_error(hotels)
+flights = [] if flight_err else flights
+hotels = [] if hotel_err else hotels
 
-st.markdown(f"### Your trip: *{trip['query']}*")
-
-m1, m2, m3 = st.columns(3)
-m1.metric("Flights found", 0 if flight_err else len(flights))
-m2.metric("Hotel options", 0 if hotel_err else len(hotels))
-m3.metric("Agent steps", result.get("llm_calls", 0))
-
-tab_overview, tab_flights, tab_hotels, tab_plan = st.tabs(
-    ["✨ Overview", "✈️ Flights", "🏨 Hotels", "🗺️ Itinerary"]
+# Trip summary bar: "Mumbai (BOM) → Dubai (DXB) · Wed, 11 Nov 2026 · 5 flights · 5 stays"
+if flights:
+    d0, a0 = flights[0].get("departure", {}), flights[0].get("arrival", {})
+    route = (f"{esc(short_airport(d0.get('airport')))} ({esc(d0.get('iata'))}) → "
+             f"{esc(short_airport(a0.get('airport')))} ({esc(a0.get('iata'))})")
+    dates = sorted({fmt_day(leg_dt(f.get("departure", {}))) for f in flights} - {"—"})
+    when = dates[0] if len(dates) == 1 else (f"{dates[0]} – {dates[-1]}" if dates else "")
+else:
+    route, when = esc(trip["query"]), ""
+st.markdown(
+    f"""
+    <div class="tripbar">
+      <span class="route">✈️ {route}</span>
+      {f'<span class="chip">📅 {when}</span>' if when else ''}
+      <span class="chip">🛫 {len(flights)} flight{'s' if len(flights) != 1 else ''}</span>
+      <span class="chip">🏨 {len(hotels)} stay{'s' if len(hotels) != 1 else ''}</span>
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
 
-with tab_overview:
-    st.markdown(result.get("final_response") or "_No summary was generated._")
-    st.download_button(
-        "⬇️ Download trip plan (.md)",
-        data=result.get("final_response", ""),
-        file_name="trip_plan.md",
-        mime="text/markdown",
-    )
+tab_flights, tab_stays, tab_plan, tab_summary = st.tabs(
+    ["✈️ Flights", "🏨 Stays", "🗺️ Itinerary", "✨ Trip summary"]
+)
 
 with tab_flights:
     if flight_err:
@@ -349,22 +511,81 @@ with tab_flights:
     elif not flights:
         st.info("No flights were found for this route right now.")
     else:
-        statuses = sorted({(f.get("status") or "unknown") for f in flights})
-        chosen = st.multiselect("Filter by status", statuses, default=statuses)
-        for f in flights:
-            if (f.get("status") or "unknown") in chosen:
-                render_flight(f)
+        filt, res = st.columns([1, 3], gap="large")
 
-with tab_hotels:
+        with filt:
+            st.markdown("**Sort by**")
+            sort_by = st.selectbox(
+                "Sort by",
+                ["Recommended", "Departure (earliest)", "Departure (latest)",
+                 "Arrival (earliest)", "Duration (shortest)"],
+                label_visibility="collapsed",
+            )
+            st.markdown("**Airlines**")
+            airlines = sorted({(f.get("airline", {}).get("name") or "Unknown") for f in flights})
+            chosen_air = [a for a in airlines if st.checkbox(a, value=True, key=f"air_{sel}_{a}")]
+            st.markdown("**Departure time**")
+            buckets = sorted({time_bucket(leg_dt(f.get("departure", {}))) for f in flights})
+            chosen_bkt = [b for b in buckets if st.checkbox(b, value=True, key=f"bkt_{sel}_{b}")]
+            st.markdown("**Status**")
+            statuses = sorted({(f.get("status") or "unknown") for f in flights})
+            chosen_st = [s for s in statuses if st.checkbox(s.capitalize(), value=True, key=f"st_{sel}_{s}")]
+
+        shown = [
+            f for f in flights
+            if (f.get("airline", {}).get("name") or "Unknown") in chosen_air
+            and time_bucket(leg_dt(f.get("departure", {}))) in chosen_bkt
+            and (f.get("status") or "unknown") in chosen_st
+        ]
+        far_future, far_long = datetime.max, 10**9
+        sorters = {
+            "Departure (earliest)": lambda f: leg_dt(f.get("departure", {})) or far_future,
+            "Departure (latest)": lambda f: leg_dt(f.get("departure", {})) or datetime.min,
+            "Arrival (earliest)": lambda f: leg_dt(f.get("arrival", {})) or far_future,
+            "Duration (shortest)": lambda f: f.get("duration_min") or far_long,
+        }
+        if sort_by in sorters:
+            shown.sort(key=sorters[sort_by], reverse=(sort_by == "Departure (latest)"))
+
+        # Highlight tags, like booking sites' "Earliest" / "Fastest" labels
+        with_dt = [f for f in flights if leg_dt(f.get("departure", {}))]
+        earliest = min(with_dt, key=lambda f: leg_dt(f["departure"])) if with_dt else None
+        with_dur = [f for f in flights if f.get("duration_min")]
+        fastest = min(with_dur, key=lambda f: f["duration_min"]) if with_dur else None
+
+        with res:
+            st.markdown(f"#### Choose your flight  \n<span class='muted'>{len(shown)} of {len(flights)} "
+                        "results · times are local to each airport · fares open in Google Flights</span>",
+                        unsafe_allow_html=True)
+            if not shown:
+                st.info("No flights match these filters.")
+            for f in shown:
+                tags = []
+                if f is earliest and len(flights) > 1:
+                    tags.append("Earliest")
+                if f is fastest and len(flights) > 1:
+                    tags.append("Fastest")
+                render_flight(f, tags)
+
+with tab_stays:
     if hotel_err:
-        st.warning(f"Couldn't load hotels: {hotel_err}")
+        st.warning(f"Couldn't load stays: {hotel_err}")
     elif not hotels:
-        st.info("No hotel results were found.")
+        st.info("No stays were found.")
     else:
-        cols = st.columns(2)
-        for i, h in enumerate(hotels):
-            with cols[i % 2]:
-                render_hotel(h)
+        st.markdown(f"#### {len(hotels)} places to stay  \n<span class='muted'>From web search · "
+                    "score shows how well each result matches your request</span>", unsafe_allow_html=True)
+        for i, h in enumerate(sorted(hotels, key=lambda h: h.get("score") or 0, reverse=True)):
+            render_stay(h, i)
 
 with tab_plan:
     st.markdown(result.get("itinerary") or "_No itinerary was generated._")
+
+with tab_summary:
+    st.markdown(result.get("final_response") or "_No summary was generated._")
+    st.download_button(
+        "⬇️ Download trip plan (.md)",
+        data=result.get("final_response", ""),
+        file_name="trip_plan.md",
+        mime="text/markdown",
+    )
