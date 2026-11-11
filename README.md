@@ -90,7 +90,10 @@ tavily_API_KEY=tvly-your_tavily_key
 DATABASE_URL=postgresql://user:password@localhost:5432/travel
 ```
 
-The checkpoint tables are created automatically the first time the app runs.
+`DATABASE_URL` is **optional**:
+
+- **Set:** conversation history is saved to Postgres through a connection pool that reconnects automatically after idle pauses, which suits serverless databases such as [Neon](https://neon.tech). The checkpoint tables are created on first run.
+- **Not set, or the database can't be reached:** the app still works, and history is kept in memory until the app restarts.
 
 ### 3. Run
 
