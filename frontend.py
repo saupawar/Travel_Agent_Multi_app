@@ -90,6 +90,8 @@ st.markdown(
     .route .end.right { text-align:right; }
     .route .code { font-size:1.6rem; font-weight:700; line-height:1.1; }
     .route .line { flex:1; text-align:center; opacity:.6; font-size:1.2rem; }
+    .route .when  { margin-top:.45rem; font-weight:600; }
+    .route .clock { font-size:1.35rem; font-weight:700; }
     .badge {
         display:inline-block; padding:.15rem .6rem; border-radius:999px;
         font-size:.78rem; font-weight:600; text-transform:capitalize;
@@ -115,13 +117,19 @@ def parse_json_list(raw: str) -> list[dict]:
         return []
 
 
-def fmt_time(iso: str | None) -> str:
+def leg_date_time(leg: dict) -> tuple[str, str]:
+    """(date, time) for a departure/arrival leg, e.g. ('Wed, 11 Nov 2026', '16:25').
+    Uses the tool's pre-split fields, falling back to parsing 'scheduled'."""
+    if leg.get("date") or leg.get("time"):
+        return leg.get("date") or "—", leg.get("time") or "—"
+    iso = leg.get("scheduled")
     if not iso:
-        return "—"
+        return "—", "—"
     try:
-        return datetime.fromisoformat(iso).strftime("%d %b, %H:%M")
+        dt = datetime.fromisoformat(iso)  # Aviationstack: local time, no conversion
+        return dt.strftime("%a, %d %b %Y"), dt.strftime("%H:%M")
     except ValueError:
-        return iso
+        return iso, "—"
 
 
 def esc(text) -> str:
@@ -145,6 +153,8 @@ def render_flight(f: dict):
     arr_extra = " · ".join(
         x for x in [f"T{arr['terminal']}" if arr.get("terminal") else "", f"Gate {arr['gate']}" if arr.get("gate") else ""] if x
     )
+    dep_date, dep_time = leg_date_time(dep)
+    arr_date, arr_time = leg_date_time(arr)
     st.markdown(
         f"""
         <div class="card">
@@ -157,18 +167,21 @@ def render_flight(f: dict):
             <div class="end">
               <div class="code">{esc(dep.get('iata') or '—')}</div>
               <div class="muted">{esc(dep.get('airport') or '')}</div>
-              <div><b>{fmt_time(dep.get('scheduled'))}</b></div>
+              <div class="when">🛫 {esc(dep_date)}</div>
+              <div class="clock">{esc(dep_time)}</div>
               <div class="muted">{esc(dep_extra)}</div>
             </div>
             <div class="line">──────── ✈ ────────</div>
             <div class="end right">
               <div class="code">{esc(arr.get('iata') or '—')}</div>
               <div class="muted">{esc(arr.get('airport') or '')}</div>
-              <div><b>{fmt_time(arr.get('scheduled'))}</b></div>
+              <div class="when">🛬 {esc(arr_date)}</div>
+              <div class="clock">{esc(arr_time)}</div>
               <div class="muted">{esc(arr_extra)}</div>
             </div>
           </div>
-          {f'<div class="muted" style="margin-top:.5rem">⏱ Departure delayed by {esc(delay)} min</div>' if delay else ''}
+          <div class="muted" style="margin-top:.5rem">Times are local to each airport.</div>
+          {f'<div class="muted">⏱ Departure delayed by {esc(delay)} min</div>' if delay else ''}
         </div>
         """,
         unsafe_allow_html=True,
